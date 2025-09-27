@@ -1,51 +1,43 @@
 import streamlit as st
-import speech_recognition as sr
+import whisper
 
-# Initialize recognizer
-recognizer = sr.Recognizer()
+# Load Whisper model
+model = whisper.load_model("base")
 
-st.title("Speech Recognition App (File-Based)")
+st.title("Speech Recognition App (File-Based with Whisper)")
 
 st.write("""
-Upload a `.wav` or `.flac` audio file, select the speech recognition API and language, 
-and get the transcribed text. No microphone required.
+Upload a `.wav` or `.flac` audio file, and get the transcribed text using OpenAI's Whisper model.
 """)
 
 # Upload audio file
 audio_file = st.file_uploader("Upload audio file", type=["wav", "flac"])
-
-# API selection
-api_choice = st.selectbox("Select API", ["Google", "Sphinx"])
-
-# Language selection
-language = st.selectbox("Select language", ["en-US", "fr-FR", "es-ES", "de-DE"])
 
 if audio_file is not None:
     # Save uploaded file temporarily
     with open("temp_audio.wav", "wb") as f:
         f.write(audio_file.getbuffer())
 
-    # Process the audio file
-    with sr.AudioFile("temp_audio.wav") as source:
-        audio_data = recognizer.record(source)
-        try:
-            if api_choice.lower() == "google":
-                text = recognizer.recognize_google(audio_data, language=language)
-            elif api_choice.lower() == "sphinx":
-                text = recognizer.recognize_sphinx(audio_data, language=language)
-            else:
-                text = recognizer.recognize_google(audio_data, language=language)
+    # Load and process the audio file
+    audio = whisper.load_audio("temp_audio.wav")
+    audio = whisper.pad_or_trim(audio)
 
-            st.success("Transcription successful!")
-            st.text_area("Transcribed Text", value=text, height=200)
+    # Make log-Mel spectrogram and move to the same device as the model
+    mel = whisper.log_mel_spectrogram(audio).to(model.device)
 
-            # Option to save the transcription
-            if st.button("Save Transcription"):
-                with open("transcription.txt", "w", encoding="utf-8") as f:
-                    f.write(text)
-                st.success("Transcription saved as transcription.txt")
+    # Detect language
+    _, probs = model.detect_language(mel)
+    st.write(f"Detected language: {max(probs, key=probs.get)}")
 
-        except sr.UnknownValueError:
-            st.error("Could not understand the audio.")
-        except sr.RequestError as e:
-            st.error(f"API request failed: {e}")
+    # Decode the audio
+    options = whisper.DecodingOptions(fp16=False)
+    result = whisper.decode(model, mel, options)
+
+    st.success("Transcription successful!")
+    st.text_area("Transcribed Text", value=result.text, height=200)
+
+    # Option to save the transcription
+    if st.button("Save Transcription"):
+        with open("transcription.txt", "w", encoding="utf-8") as f:
+            f.write(result.text)
+        st.success("Transcription saved as transcription.txt")
